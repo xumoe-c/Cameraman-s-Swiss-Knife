@@ -1,4 +1,5 @@
-import { type CSSProperties, useState } from 'react'
+import { App } from '@capacitor/app'
+import { type CSSProperties, useEffect, useState } from 'react'
 import { kelvinToRgb } from '../../domain/temperature'
 import { useAppStore } from '../../stores/useAppStore'
 import { ExposureScreen } from '../screens/ExposureScreen'
@@ -17,6 +18,39 @@ export function AppShell() {
   const setTemperature = useAppStore((state) => state.setTemperature)
   const rgb = kelvinToRgb(temperature)
   const previewBgStyle = { '--preview-bg': rgbToCss(rgb) } as CSSProperties
+
+  useEffect(() => {
+    let active = true
+    let removeListener: (() => void) | undefined
+
+    void App.addListener('backButton', () => {
+      if (fullscreenOpen) {
+        setFullscreenOpen(false)
+        return
+      }
+
+      if (route !== 'home') {
+        setRoute('home')
+        return
+      }
+
+      void App.exitApp()
+    }).then((handle) => {
+      if (!active) {
+        void handle.remove()
+        return
+      }
+
+      removeListener = () => {
+        void handle.remove()
+      }
+    })
+
+    return () => {
+      active = false
+      removeListener?.()
+    }
+  }, [fullscreenOpen, route])
 
   return (
     <main className="app-main">
