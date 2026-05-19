@@ -1,13 +1,287 @@
-import React, { useState } from 'react'
-import { computeExposurePlan } from '../../domain/exposure'
-import { formatShutterDisplay, formatShutterRangeDisplay } from '../formatters/exposureFormat'
+import { useEffect, useRef, useState } from 'react'
+import { computeExposurePlan, ND_PRESETS } from '../../domain/exposure'
+import { formatShutterDisplay } from '../formatters/exposureFormat'
 import { useExposureStore } from '../../stores/exposureStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { ND_PRESETS } from '../../domain/exposure'
 
-// presentation formatting helpers in ../formatters/exposureFormat
+type ExposureScreenProps = {
+  onBack?: () => void
+}
 
-export function ExposureScreen() {
+type PickerItem = {
+  main: string
+  sub?: string
+}
+
+type WheelPickerProps = {
+  title: string
+  items: PickerItem[]
+  currentIndex: number
+  valueTestId: string
+  prevTestId: string
+  nextTestId: string
+  onPrev: () => void
+  onNext: () => void
+}
+
+const shutterOptions: Array<{ label: string; value: number }> = [
+  { label: '30s', value: 30 },
+  { label: '25s', value: 25 },
+  { label: '20s', value: 20 },
+  { label: '15s', value: 15 },
+  { label: '13s', value: 13 },
+  { label: '10s', value: 10 },
+  { label: '8s', value: 8 },
+  { label: '6s', value: 6 },
+  { label: '5s', value: 5 },
+  { label: '4s', value: 4 },
+  { label: '3.2s', value: 3.2 },
+  { label: '2.5s', value: 2.5 },
+  { label: '2s', value: 2 },
+  { label: '1.6s', value: 1.6 },
+  { label: '1.3s', value: 1.3 },
+  { label: '1s', value: 1 },
+  { label: '0.8s', value: 0.8 },
+  { label: '0.6s', value: 0.6 },
+  { label: '0.5s', value: 0.5 },
+  { label: '0.4s', value: 0.4 },
+  { label: '0.3s', value: 0.3 },
+  { label: '1/4s', value: 0.25 },
+  { label: '1/5s', value: 0.2 },
+  { label: '1/6s', value: 1 / 6 },
+  { label: '1/8s', value: 1 / 8 },
+  { label: '1/10s', value: 1 / 10 },
+  { label: '1/13s', value: 1 / 13 },
+  { label: '1/15s', value: 1 / 15 },
+  { label: '1/20s', value: 1 / 20 },
+  { label: '1/25s', value: 1 / 25 },
+  { label: '1/30s', value: 1 / 30 },
+  { label: '1/40s', value: 1 / 40 },
+  { label: '1/50s', value: 1 / 50 },
+  { label: '1/60s', value: 1 / 60 },
+  { label: '1/80s', value: 1 / 80 },
+  { label: '1/100s', value: 1 / 100 },
+  { label: '1/125s', value: 1 / 125 },
+  { label: '1/160s', value: 1 / 160 },
+  { label: '1/200s', value: 1 / 200 },
+  { label: '1/250s', value: 1 / 250 },
+  { label: '1/320s', value: 1 / 320 },
+  { label: '1/400s', value: 1 / 400 },
+  { label: '1/500s', value: 1 / 500 },
+  { label: '1/640s', value: 1 / 640 },
+  { label: '1/800s', value: 1 / 800 },
+  { label: '1/1000s', value: 1 / 1000 },
+  { label: '1/1250s', value: 1 / 1250 },
+  { label: '1/1600s', value: 1 / 1600 },
+  { label: '1/2000s', value: 1 / 2000 },
+  { label: '1/2500s', value: 1 / 2500 },
+  { label: '1/3200s', value: 1 / 3200 },
+  { label: '1/4000s', value: 1 / 4000 },
+  { label: '1/5000s', value: 1 / 5000 },
+  { label: '1/6400s', value: 1 / 6400 },
+  { label: '1/8000s', value: 1 / 8000 },
+]
+
+const compensationOptions = [
+  -3.0,
+  -2.7,
+  -2.3,
+  -2.0,
+  -1.7,
+  -1.3,
+  -1.0,
+  -0.7,
+  -0.3,
+  0.0,
+  0.3,
+  0.7,
+  1.0,
+  1.3,
+  1.7,
+  2.0,
+  2.3,
+  2.7,
+  3.0,
+]
+
+function wrappedIndex(index: number, length: number): number {
+  return ((index % length) + length) % length
+}
+
+function formatStopLabel(stops: number): string {
+  const rounded = Number.isInteger(stops) ? stops.toFixed(0) : stops.toFixed(1)
+  return `${rounded}-STOP${rounded === '1' ? '' : 'S'}`
+}
+
+function formatPickerShutter(label: string): string {
+  if (label.endsWith('s') && !label.includes('/')) {
+    return label.slice(0, -1)
+  }
+
+  return label
+}
+
+function formatCompensation(value: number): string {
+  if (Object.is(value, -0)) return '0'
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function formatTimerDisplay(seconds: number): string {
+  if (!isFinite(seconds) || seconds <= 0) {
+    return '00:00:00'
+  }
+
+  if (seconds > 60) {
+    const totalSeconds = Math.round(seconds)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const remainingSeconds = totalSeconds % 60
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+  }
+
+  return formatShutterDisplay(seconds)
+}
+
+function WheelPicker({
+  title,
+  items,
+  currentIndex,
+  valueTestId,
+  prevTestId,
+  nextTestId,
+  onPrev,
+  onNext,
+}: WheelPickerProps) {
+  const safeIndex = wrappedIndex(currentIndex < 0 ? 0 : currentIndex, items.length)
+  const previous = items[wrappedIndex(safeIndex - 1, items.length)]
+  const current = items[safeIndex]
+  const next = items[wrappedIndex(safeIndex + 1, items.length)]
+  const pickerClassName = title === '滤镜档位' ? 'exposure-picker exposure-picker-nd' : 'exposure-picker'
+
+  return (
+    <div className="exposure-field">
+      <div className="exposure-field-title">{title}</div>
+      <div className="exposure-divider exposure-divider-top" />
+      <div className={pickerClassName} aria-label={title}>
+        <button
+          type="button"
+          data-testid={prevTestId}
+          className="exposure-picker-option exposure-picker-side"
+          onClick={onPrev}
+          aria-label={`${title}上一档`}
+        >
+          <span className="exposure-picker-main">{previous.main}</span>
+          {previous.sub && <span className="exposure-picker-sub">{previous.sub}</span>}
+        </button>
+        <div data-testid={valueTestId} className="exposure-picker-option exposure-picker-current" aria-live="polite">
+          <span className="exposure-picker-main">{current.main}</span>
+          {current.sub && <span className="exposure-picker-sub">{current.sub}</span>}
+        </div>
+        <button
+          type="button"
+          data-testid={nextTestId}
+          className="exposure-picker-option exposure-picker-side"
+          onClick={onNext}
+          aria-label={`${title}下一档`}
+        >
+          <span className="exposure-picker-main">{next.main}</span>
+          {next.sub && <span className="exposure-picker-sub">{next.sub}</span>}
+        </button>
+      </div>
+      <div className="exposure-divider exposure-divider-bottom" />
+    </div>
+  )
+}
+
+function useLongExposureTimer(seconds: number) {
+  const [running, setRunning] = useState(false)
+  const [remaining, setRemaining] = useState(seconds)
+  const [hasStarted, setHasStarted] = useState(false)
+  const startedAtRef = useRef<number | null>(null)
+  const pausedElapsedRef = useRef(0)
+  const intervalRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (intervalRef.current != null) {
+      window.clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+
+    startedAtRef.current = null
+    pausedElapsedRef.current = 0
+    setRunning(false)
+    setRemaining(seconds)
+    setHasStarted(false)
+  }, [seconds])
+
+  useEffect(() => {
+    if (!running) return undefined
+
+    function tick() {
+      const now = Date.now()
+      if (startedAtRef.current == null) {
+        startedAtRef.current = now
+      }
+
+      const elapsed = (now - startedAtRef.current) / 1000 + pausedElapsedRef.current
+      const nextRemaining = Math.max(0, seconds - elapsed)
+      setRemaining(nextRemaining)
+
+      if (nextRemaining <= 0) {
+        setRunning(false)
+        startedAtRef.current = null
+        pausedElapsedRef.current = 0
+      }
+    }
+
+    tick()
+    intervalRef.current = window.setInterval(tick, 250)
+
+    return () => {
+      if (intervalRef.current != null) {
+        window.clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [running, seconds])
+
+  const toggle = () => {
+    if (!isFinite(seconds) || seconds < 4) return
+
+    if (running) {
+      if (startedAtRef.current != null) {
+        pausedElapsedRef.current += (Date.now() - startedAtRef.current) / 1000
+      }
+      startedAtRef.current = null
+      setRunning(false)
+      return
+    }
+
+    startedAtRef.current = Date.now()
+    setHasStarted(true)
+    setRunning(true)
+  }
+
+  const reset = () => {
+    startedAtRef.current = null
+    pausedElapsedRef.current = 0
+    setRemaining(seconds)
+    setRunning(false)
+    setHasStarted(false)
+  }
+
+  return {
+    running,
+    remaining,
+    hasStarted,
+    hasProgress: hasStarted && remaining < seconds,
+    toggle,
+    reset,
+  }
+}
+
+export function ExposureScreen({ onBack }: ExposureScreenProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const aperture = useExposureStore((state) => state.aperture)
   const shutterSeconds = useExposureStore((state) => state.shutterSeconds)
   const iso = useExposureStore((state) => state.iso)
@@ -15,14 +289,11 @@ export function ExposureScreen() {
   const ndPreset = useExposureStore((state) => state.ndPreset)
   const customNdFactor = useExposureStore((state) => state.customNdFactor)
 
-  const setAperture = useExposureStore((state) => state.setAperture)
   const setShutterSeconds = useExposureStore((state) => state.setShutterSeconds)
-  const setIso = useExposureStore((state) => state.setIso)
   const setCompensationEv = useExposureStore((state) => state.setCompensationEv)
   const setNdPreset = useExposureStore((state) => state.setNdPreset)
-  const setCustomNdFactor = useExposureStore((state) => state.setCustomNdFactor)
-
-  const solveFor = 'shutter' as const
+  const showNdStops = useSettingsStore((s) => s.showNdStops)
+  const setShowNdStops = useSettingsStore((s) => s.setShowNdStops)
 
   const plan = computeExposurePlan({
     aperture,
@@ -30,215 +301,131 @@ export function ExposureScreen() {
     iso,
     compensationEv,
     ndPreset,
-    solveFor,
+    solveFor: 'shutter',
     customNdFactor,
   })
 
-  const solvedValue = plan.solvedShutterSeconds
-  const bulbDisplaySeconds = Math.round(plan.ndAdjustedShutterSeconds)
-  const ndDisplayMode = useSettingsStore((s) => s.ndDisplayMode)
-  const showNdStops = useSettingsStore((s) => s.showNdStops)
-  const ndSelectedStopsLabel = `${Math.round(plan.ndStops)} stop${Math.round(plan.ndStops) === 1 ? '' : 's'}`
-
-  const solvedLabel = '快门'
-  const solvedDisplay = formatShutterRangeDisplay(solvedValue, 5, 25)
-  // option lists
-
-  const shutterOptions: Array<{ label: string; value: number }> = [
-    { label: '30s', value: 30 },
-    { label: '25s', value: 25 },
-    { label: '20s', value: 20 },
-    { label: '15s', value: 15 },
-    { label: '13s', value: 13 },
-    { label: '10s', value: 10 },
-    { label: '8s', value: 8 },
-    { label: '6s', value: 6 },
-    { label: '5s', value: 5 },
-    { label: '4s', value: 4 },
-    { label: '3.2s', value: 3.2 },
-    { label: '2.5s', value: 2.5 },
-    { label: '2s', value: 2 },
-    { label: '1.6s', value: 1.6 },
-    { label: '1.3s', value: 1.3 },
-    { label: '1s', value: 1 },
-    { label: '0.8s', value: 0.8 },
-    { label: '0.6s', value: 0.6 },
-    { label: '0.5s', value: 0.5 },
-    { label: '0.4s', value: 0.4 },
-    { label: '0.3s', value: 0.3 },
-    { label: '1/4s', value: 0.25 },
-    { label: '1/5s', value: 0.2 },
-    { label: '1/6s', value: 1 / 6 },
-    { label: '1/8s', value: 1 / 8 },
-    { label: '1/10s', value: 1 / 10 },
-    { label: '1/13s', value: 1 / 13 },
-    { label: '1/15s', value: 1 / 15 },
-    { label: '1/20s', value: 1 / 20 },
-    { label: '1/25s', value: 1 / 25 },
-    { label: '1/30s', value: 1 / 30 },
-    { label: '1/40s', value: 1 / 40 },
-    { label: '1/50s', value: 1 / 50 },
-    { label: '1/60s', value: 1 / 60 },
-    { label: '1/80s', value: 1 / 80 },
-    { label: '1/100s', value: 1 / 100 },
-    { label: '1/125s', value: 1 / 125 },
-    { label: '1/160s', value: 1 / 160 },
-    { label: '1/200s', value: 1 / 200 },
-    { label: '1/250s', value: 1 / 250 },
-    { label: '1/320s', value: 1 / 320 },
-    { label: '1/400s', value: 1 / 400 },
-    { label: '1/500s', value: 1 / 500 },
-    { label: '1/640s', value: 1 / 640 },
-    { label: '1/800s', value: 1 / 800 },
-    { label: '1/1000s', value: 1 / 1000 },
-    { label: '1/1250s', value: 1 / 1250 },
-    { label: '1/1600s', value: 1 / 1600 },
-    { label: '1/2000s', value: 1 / 2000 },
-    { label: '1/2500s', value: 1 / 2500 },
-    { label: '1/3200s', value: 1 / 3200 },
-    { label: '1/4000s', value: 1 / 4000 },
-    { label: '1/5000s', value: 1 / 5000 },
-    { label: '1/6400s', value: 1 / 6400 },
-    { label: '1/8000s', value: 1 / 8000 },
-  ]
-  const shutterLabelMap = new Map(shutterOptions.map((option) => [option.value.toFixed(6), option.label]))
-
-  const compensationOptions = [
-    -3.0, -2.7, -2.3, -2.0, -1.7, -1.3, -1.0, -0.7, -0.3, 0.0, 0.3, 0.7, 1.0, 1.3, 1.7, 2.0, 2.3, 2.7, 3.0,
-  ]
-
   const ndKeys = Object.keys(ND_PRESETS)
-  const [shutterOpen, setShutterOpen] = useState(false)
-  const [compOpen, setCompOpen] = useState(false)
-
-  // helper to format nd-adjusted shutter: if >60s show hh:mm:ss
-  function formatMaybeHMS(sec: number) {
-    if (!isFinite(sec) || sec <= 0) return formatShutterDisplay(sec)
-    if (sec > 60) {
-      const s = Math.round(sec)
-      const hours = Math.floor(s / 3600)
-      const minutes = Math.floor((s % 3600) / 60)
-      const seconds = s % 60
-      const hh = String(hours).padStart(2, '0')
-      const mm = String(minutes).padStart(2, '0')
-      const ss = String(seconds).padStart(2, '0')
-      return `${hh}:${mm}:${ss}`
+  const currentNdIndex = Math.max(0, ndKeys.indexOf(ndPreset))
+  const ndItems = ndKeys.map((key) => {
+    const preset = ND_PRESETS[key]
+    return {
+      main: preset.label,
+      sub: showNdStops ? formatStopLabel(preset.stops) : undefined,
     }
-    return formatShutterDisplay(sec)
-  }
+  })
 
-  // nd switch helpers
-  const currentNdIndex = ndKeys.indexOf(ndPreset)
-  const ndPrev = () => {
-    const i = currentNdIndex <= 0 ? ndKeys.length - 1 : currentNdIndex - 1
-    setNdPreset(ndKeys[i])
-  }
-  const ndNext = () => {
-    const i = currentNdIndex >= ndKeys.length - 1 ? 0 : currentNdIndex + 1
-    setNdPreset(ndKeys[i])
-  }
+  const currentShutterIndex = shutterOptions.findIndex((option) => Math.abs(option.value - shutterSeconds) < 0.0001)
+  const shutterItems = shutterOptions.map((option) => ({
+    main: formatPickerShutter(option.label),
+  }))
 
-  // base shutter switch helpers
-  const findShutterIndex = () => shutterOptions.findIndex((o) => Math.abs(o.value - shutterSeconds) < 0.0001)
-  const currentShutterLabel = shutterLabelMap.get(shutterSeconds.toFixed(6)) ?? formatShutterDisplay(shutterSeconds)
-  const shutterPrev = () => {
-    const idx = findShutterIndex()
-    const i = idx <= 0 ? shutterOptions.length - 1 : idx - 1
-    setShutterSeconds(shutterOptions[i].value)
-  }
-  const shutterNext = () => {
-    const idx = findShutterIndex()
-    const i = idx >= shutterOptions.length - 1 ? 0 : idx + 1
-    setShutterSeconds(shutterOptions[i].value)
-  }
+  const currentCompIndex = compensationOptions.findIndex((value) => Math.abs(value - compensationEv) < 0.001)
+  const compItems = compensationOptions.map((value) => ({
+    main: formatCompensation(value),
+  }))
 
-  // compensation switch helpers
-  const findCompIndex = () => compensationOptions.findIndex((v) => Math.abs(v - compensationEv) < 0.001)
-  const compPrev = () => {
-    const idx = findCompIndex()
-    const i = idx <= 0 ? compensationOptions.length - 1 : idx - 1
-    setCompensationEv(compensationOptions[i])
-  }
-  const compNext = () => {
-    const idx = findCompIndex()
-    const i = idx >= compensationOptions.length - 1 ? 0 : idx + 1
-    setCompensationEv(compensationOptions[i])
-  }
+  const setWrappedNdIndex = (index: number) => setNdPreset(ndKeys[wrappedIndex(index, ndKeys.length)])
+  const setWrappedShutterIndex = (index: number) => setShutterSeconds(shutterOptions[wrappedIndex(index, shutterOptions.length)].value)
+  const setWrappedCompIndex = (index: number) => setCompensationEv(compensationOptions[wrappedIndex(index, compensationOptions.length)])
+
+  const targetSeconds = plan.ndAdjustedShutterSeconds
+  const timer = useLongExposureTimer(targetSeconds)
+  const displayedSeconds = timer.hasStarted ? timer.remaining : targetSeconds
 
   return (
-    <section className="container" data-testid="exposure-page">
-      {/* 顶部标题栏 + 设置按钮 */}
-      <div className="header-row">
-        <h1 className="h1">曝光计算器</h1>
-      </div>
+    <section className="exposure-screen" data-testid="exposure-page">
+      <header className="exposure-topbar">
+        <button type="button" className="exposure-icon-button" onClick={onBack} aria-label="返回主页">
+          ←
+        </button>
+        <h1 className="exposure-title">曝光计算器</h1>
+        <button
+          type="button"
+          className="exposure-icon-button"
+          aria-label="设置"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen((open) => !open)}
+        >
+          ⚙
+        </button>
+      </header>
 
-      {/* 参数区：ND 选择在顶部以符合线框 */}
-      <div className="grid-1">
-        <div className="label-block">
-          滤镜档位
-          <div className="switch-inline switch-inline-stack">
-            <button data-testid="nd-switch-prev" className="btn" onClick={ndPrev} aria-label="prev">◀</button>
-            <div data-testid="nd-switch-value" className="switch-value switch-value-stack">
-              <span className="switch-main-value">{ND_PRESETS[ndPreset]?.label ?? ndPreset}</span>
-              {showNdStops && ndPreset !== 'custom' && (
-                <span data-testid="nd-selected-stops" className="switch-subvalue">{ndSelectedStopsLabel}</span>
-              )}
-            </div>
-            <button data-testid="nd-switch-next" className="btn" onClick={ndNext} aria-label="next">▶</button>
-          </div>
-        </div>
-
-        {/* 光圈选项已删除（按需求） */}
-
-        <div className="label-block">
-          <div>快门</div>
-          <div className="switch-inline">
-            <button data-testid="base-shutter-prev" className="btn" onClick={shutterPrev}>◀</button>
-            <div data-testid="base-shutter-value" className="switch-value">{currentShutterLabel}</div>
-            <button data-testid="base-shutter-next" className="btn" onClick={shutterNext}>▶</button>
-          </div>
-        </div>
-
-        {/* ISO 调整组件已删除 */}
-
-        <div className="label-block">
-          曝光补偿
-          <div className="switch-inline">
-            <button data-testid="comp-prev" className="btn" onClick={compPrev}>◀</button>
-            <div data-testid="comp-value" className="switch-value">{compensationEv > 0 ? `+${compensationEv} EV` : `${compensationEv} EV`}</div>
-            <button data-testid="comp-next" className="btn" onClick={compNext}>▶</button>
-          </div>
-        </div>
-
-        {ndPreset === 'custom' && (
-          <label className="label-block">
-            自定义 ND 因子
+      {settingsOpen && (
+        <div className="exposure-settings-popover">
+          <label className="exposure-setting-row">
             <input
-              type="number"
-              min={1}
-              step={1}
-              value={customNdFactor}
-              onChange={(event) => setCustomNdFactor(Number(event.target.value))}
-              className="select-full mt-8"
+              type="checkbox"
+              checked={showNdStops}
+              onChange={(event) => setShowNdStops(event.target.checked)}
             />
+            显示 ND 档位
           </label>
+          <div className="exposure-setting-metric">
+            EVISO <strong>{plan.baseEvIso.toFixed(2)}</strong>
+          </div>
+        </div>
+      )}
+
+      <div className="exposure-picker-stack">
+        <WheelPicker
+          title="滤镜档位"
+          items={ndItems}
+          currentIndex={currentNdIndex}
+          valueTestId="nd-switch-value"
+          prevTestId="nd-switch-prev"
+          nextTestId="nd-switch-next"
+          onPrev={() => setWrappedNdIndex(currentNdIndex - 1)}
+          onNext={() => setWrappedNdIndex(currentNdIndex + 1)}
+        />
+
+        <WheelPicker
+          title="基础快门"
+          items={shutterItems}
+          currentIndex={currentShutterIndex}
+          valueTestId="base-shutter-value"
+          prevTestId="base-shutter-prev"
+          nextTestId="base-shutter-next"
+          onPrev={() => setWrappedShutterIndex(currentShutterIndex - 1)}
+          onNext={() => setWrappedShutterIndex(currentShutterIndex + 1)}
+        />
+
+        <WheelPicker
+          title="曝光补偿"
+          items={compItems}
+          currentIndex={currentCompIndex}
+          valueTestId="comp-value"
+          prevTestId="comp-prev"
+          nextTestId="comp-next"
+          onPrev={() => setWrappedCompIndex(currentCompIndex - 1)}
+          onNext={() => setWrappedCompIndex(currentCompIndex + 1)}
+        />
+      </div>
+
+      <section className="exposure-result">
+        <div className="exposure-result-label">装入滤镜后的快门时间</div>
+        <div data-testid="nd-shutter-result" className="exposure-result-time">
+          {formatTimerDisplay(displayedSeconds)}
+        </div>
+
+        {plan.isBulbMode && (
+          <div data-testid="exposure-bulb-timer" className="exposure-timer">
+            <button
+              type="button"
+              data-testid="bulb-start-btn"
+              className={`exposure-start-button ${timer.running ? 'is-running' : ''}`}
+              onClick={timer.toggle}
+            >
+              {timer.running ? '暂停' : '开始'}
+            </button>
+            {(timer.hasProgress || timer.running) && (
+              <button type="button" data-testid="bulb-reset-btn" className="exposure-reset-button" onClick={timer.reset}>
+                重置
+              </button>
+            )}
+          </div>
         )}
-      </div>
-
-      {/* 结果区 */}
-      <div className="grid-1-sm mb-14">
-        {/* ND 调整后快门结果放在上方，EV 卡片移至下方 */}
-        <div className="card card-center">
-          <h3 className="card-title">装入滤镜后的快门时间</h3>
-          <div data-testid="nd-shutter-result" className="large-32" style={{ textAlign: 'center' }}>{formatMaybeHMS(plan.ndAdjustedShutterSeconds)}</div>
-        </div>
-
-        <div className="card">
-          <h3 className="card-title">当前 EV100 / EVISO</h3>
-          <div data-testid="ev-display" className="large-22">{plan.baseEvIso.toFixed(2)}</div>
-          <p className="muted-small mt-8">基于当前三参数计算的基础曝光值</p>
-        </div>
-      </div>
+      </section>
     </section>
   )
 }

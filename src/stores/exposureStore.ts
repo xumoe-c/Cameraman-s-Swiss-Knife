@@ -20,10 +20,10 @@ export interface ExposureStoreState {
 
 export const useExposureStore = create<ExposureStoreState>((set) => ({
   aperture: 8,
-  shutterSeconds: 0.004,
+  shutterSeconds: 2.5,
   iso: 100,
   compensationEv: 0,
-  ndPreset: 'ND1000',
+  ndPreset: 'ND512000',
   customNdFactor: 1000,
   solveFor: 'shutter',
   setAperture: (aperture) => set({ aperture }),

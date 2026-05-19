@@ -53,7 +53,7 @@ export function AppShell() {
   }, [fullscreenOpen, route])
 
   return (
-    <main className="app-main">
+    <main className={`app-main ${route === 'exposure' ? 'app-main-exposure' : ''}`}>
       {route === 'home' && (
         <section className="page-container home-center">
           <div className="card-panel">
@@ -113,9 +113,8 @@ export function AppShell() {
       )}
 
       {route === 'exposure' && (
-        <section className="page-container section-panel">
-          <button onClick={() => setRoute('home')} className="back-btn">返回主页</button>
-          <ExposureScreen />
+        <section className="page-container exposure-page-shell">
+          <ExposureScreen onBack={() => setRoute('home')} />
         </section>
       )}
 

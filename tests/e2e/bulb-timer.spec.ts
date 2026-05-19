@@ -1,5 +1,18 @@
-import { test, expect } from '@playwright/test';
-import { setRangeValue } from '../index';
+import { test, expect, type Page } from '@playwright/test';
+
+async function selectNd(page: Page, label: string) {
+  const ndMain = page.locator('[data-testid="nd-switch-value"] .exposure-picker-main');
+
+  for (let i = 0; i < 60; i++) {
+    const current = await ndMain.textContent();
+    if (current?.trim() === label) return;
+
+    await page.locator('[data-testid="nd-switch-next"]').click();
+    await page.waitForTimeout(30);
+  }
+
+  await expect(ndMain).toHaveText(label);
+}
 
 test.describe('曝光计算器 (Exposure Calculator)', () => {
   test.beforeEach(async ({ page }) => {
@@ -15,90 +28,67 @@ test.describe('曝光计算器 (Exposure Calculator)', () => {
     await expect(page.locator('[data-testid="base-shutter-value"]')).toBeVisible();
     await expect(page.locator('[data-testid="comp-value"]')).toBeVisible();
 
-    // 验证默认值显示（控件为左右切换样式）
+    // 验证默认值显示（滚轮式控件）
     const ndVal = page.locator('[data-testid="nd-switch-value"]');
-    await expect(ndVal).toBeVisible();
+    await expect(ndVal).toContainText('ND512000');
 
-    // 验证初始 EV 显示
-    const evDisplay = page.locator('[data-testid="ev-display"]');
-    await expect(evDisplay).toContainText(/\d+\.\d+/);
+    // 验证截图参考态的长曝光结果
+    await expect(page.locator('[data-testid="base-shutter-value"]')).toHaveText('2.5');
+    await expect(page.locator('[data-testid="nd-shutter-result"]')).toHaveText('364:05:20');
+    await expect(page.locator('[data-testid="exposure-bulb-timer"]')).toBeVisible();
   });
 
   
 
   test('调整快门，验证结果变化', async ({ page }) => {
-    const evDisplay2 = page.locator('[data-testid="ev-display"]');
-    const initialEv2 = await evDisplay2.textContent();
+    const resultDisplay = page.locator('[data-testid="nd-shutter-result"]');
+    const initialResult = await resultDisplay.textContent();
 
-    // 通过左右切换选择基础快门到 1s（循环尝试）
+    // 通过滚轮选择基础快门到 1s（循环尝试）
     for (let i = 0; i < 40; i++) {
       await page.locator('[data-testid="base-shutter-next"]').click();
       await page.waitForTimeout(50);
       const val = await page.locator('[data-testid="base-shutter-value"]').textContent();
-      if (val && val.includes('1s')) break;
+      if (val?.trim() === '1') break;
     }
 
     await page.waitForTimeout(100);
-    const newEv2 = await evDisplay2.textContent();
-    expect(initialEv2).not.toBe(newEv2);
+    const newResult = await resultDisplay.textContent();
+    expect(initialResult).not.toBe(newResult);
   });
 
   // ISO 调整已移除，相关用例跳过
 
   test('ND1000 选择触发 Bulb 倒计时模式', async ({ page }) => {
-    // 选择 ND1000 — Bulb 模式目前已隐藏，确保不存在对应面板
-    for (let i = 0; i < 40; i++) {
-      await page.locator('[data-testid="nd-switch-next"]').click();
-      await page.waitForTimeout(30);
-      const v = await page.locator('[data-testid="nd-switch-value"]').textContent();
-      if (v && v.includes('ND1000')) break;
-    }
+    // 选择 ND1000 后仍是长曝光，显示开始按钮
+    await selectNd(page, 'ND1000');
     await page.waitForTimeout(100);
     const bulbPanel = page.locator('[data-testid="exposure-bulb-timer"]');
-    await expect(bulbPanel).toHaveCount(0);
+    await expect(bulbPanel).toBeVisible();
+    await expect(page.locator('[data-testid="bulb-start-btn"]')).toHaveText('开始');
   });
 
   test('ND 预设切换验证档位显示', async ({ page }) => {
     // 切换到 ND1000
-    for (let i = 0; i < 40; i++) {
-      await page.locator('[data-testid="nd-switch-next"]').click();
-      await page.waitForTimeout(30);
-      const v = await page.locator('[data-testid="nd-switch-value"]').textContent();
-      if (v && v.includes('ND1000')) break;
-    }
+    await selectNd(page, 'ND1000');
     await page.waitForTimeout(100);
     let stopsText = await page.locator('[data-testid="nd-switch-value"]').textContent();
     expect(stopsText).toContain('10');
 
     // 切换到 ND64
-    for (let i = 0; i < 40; i++) {
-      await page.locator('[data-testid="nd-switch-next"]').click();
-      await page.waitForTimeout(30);
-      const v = await page.locator('[data-testid="nd-switch-value"]').textContent();
-      if (v && v.includes('ND64')) break;
-    }
+    await selectNd(page, 'ND64');
     stopsText = await page.locator('[data-testid="nd-switch-value"]').textContent();
     expect(stopsText).toContain('6');
 
     // 切换到 ND2
-    for (let i = 0; i < 40; i++) {
-      await page.locator('[data-testid="nd-switch-next"]').click();
-      await page.waitForTimeout(30);
-      const v = await page.locator('[data-testid="nd-switch-value"]').textContent();
-      if (v && v.includes('ND2')) break;
-    }
+    await selectNd(page, 'ND2');
     stopsText = await page.locator('[data-testid="nd-switch-value"]').textContent();
-    expect(stopsText).toContain('1');
+    expect(stopsText).toContain('1-STOP');
   });
 
   test('曝光补偿调整验证目标值变化', async ({ page }) => {
     // 为避免 Infinity 情况，先切到低 ND（当前固定为快门回推模式）
-    for (let i = 0; i < 40; i++) {
-      await page.locator('[data-testid="nd-switch-next"]').click();
-      await page.waitForTimeout(30);
-      const v = await page.locator('[data-testid="nd-switch-value"]').textContent();
-      if (v && v.includes('ND2')) break;
-    }
+    await selectNd(page, 'ND2');
     await page.waitForTimeout(100);
 
     const ndShutterResult = page.locator('[data-testid="nd-shutter-result"]');
@@ -126,7 +116,7 @@ test.describe('曝光计算器 (Exposure Calculator)', () => {
 
     // 固定模式下结果应始终显示快门格式（使用 ND 调整后的结果）
     const resultText = await ndShutterResult.textContent();
-    expect(resultText).toMatch(/s/);
+    expect(resultText).toMatch(/(\d+:\d{2}:\d{2}|\d+\/\d+s|[\d.]+s)/);
   });
 
   test('互锁目标标题已替换为 ND 计算结果显示', async ({ page }) => {
@@ -134,14 +124,28 @@ test.describe('曝光计算器 (Exposure Calculator)', () => {
     await expect(ndShutterResult).toBeVisible();
   });
 
-  test('Bulb 倒计时已隐藏', async ({ page }) => {
-    // Bulb 模式目前被永久隐藏
+  test('Bulb 倒计时按钮可启动和重置', async ({ page }) => {
     const bulbPanel = page.locator('[data-testid="exposure-bulb-timer"]');
-    await expect(bulbPanel).toHaveCount(0);
+    await expect(bulbPanel).toBeVisible();
+
+    const resultText = page.locator('[data-testid="nd-shutter-result"]');
+    const initialText = await resultText.textContent();
+    await page.locator('[data-testid="bulb-start-btn"]').click();
+    await expect(page.locator('[data-testid="bulb-start-btn"]')).toHaveText('暂停');
+    await page.waitForTimeout(600);
+    const runningText = await resultText.textContent();
+    expect(runningText).not.toBe(initialText);
+
+    await page.locator('[data-testid="bulb-reset-btn"]').click();
+    await expect(page.locator('[data-testid="bulb-start-btn"]')).toHaveText('开始');
+    await expect(resultText).toHaveText(initialText ?? '');
   });
 
   test('快门显示格式符合规范', async ({ page }) => {
     const ndShutterResult = page.locator('[data-testid="nd-shutter-result"]');
+
+    // 切换到 ND2，避免高 ND 档位把分数秒放大成长时间
+    await selectNd(page, 'ND2');
 
     // 通过左右切换选择 1/250s
     for (let i = 0; i < 100; i++) {
@@ -164,9 +168,9 @@ test.describe('曝光计算器 (Exposure Calculator)', () => {
       await page.locator('[data-testid="base-shutter-prev"]').click();
       await page.waitForTimeout(20);
       const value = await shutterValue.textContent();
-      if (value === '30s') break;
+      if (value === '30') break;
     }
-    await expect(shutterValue).toHaveText('30s');
+    await expect(shutterValue).toHaveText('30');
 
     for (let i = 0; i < 50; i++) {
       await page.locator('[data-testid="base-shutter-next"]').click();
@@ -185,12 +189,7 @@ test.describe('曝光计算器 (Exposure Calculator)', () => {
     const ndShutterResult = page.locator('[data-testid="nd-shutter-result"]');
 
     // 选择一个高档位的 ND
-    for (let i = 0; i < 60; i++) {
-      await page.locator('[data-testid="nd-switch-next"]').click();
-      await page.waitForTimeout(30);
-      const v = await page.locator('[data-testid="nd-switch-value"]').textContent();
-      if (v && v.includes('ND32000')) break;
-    }
+    await selectNd(page, 'ND32000');
     await page.waitForTimeout(100);
 
     // 验证档位显示（ND32000 = 15 档）

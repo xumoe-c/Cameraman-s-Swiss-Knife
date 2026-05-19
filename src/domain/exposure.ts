@@ -35,9 +35,20 @@ export const ND_PRESETS: Record<string, NdPreset> = {
   ND16: { label: 'ND16', stops: 4 },
   ND32: { label: 'ND32', stops: 5 },
   ND64: { label: 'ND64', stops: 6 },
+  ND128: { label: 'ND128', stops: 7 },
+  ND256: { label: 'ND256', stops: 8 },
   ND512: { label: 'ND512', stops: 9 },
   ND1000: { label: 'ND1000', stops: 10 },
+  ND2000: { label: 'ND2000', stops: 11 },
+  ND4000: { label: 'ND4000', stops: 12 },
+  ND8000: { label: 'ND8000', stops: 13 },
+  ND16000: { label: 'ND16000', stops: 14 },
   ND32000: { label: 'ND32000', stops: 15 },
+  ND64000: { label: 'ND64000', stops: 16 },
+  ND128000: { label: 'ND128000', stops: 17 },
+  ND256000: { label: 'ND256000', stops: 18 },
+  ND512000: { label: 'ND512000', stops: 19 },
+  ND1000K: { label: 'ND1000K', stops: 20 },
 }
 
 export const ND_PRESET_OPTIONS = Object.entries(ND_PRESETS).map(([value, preset]) => ({
